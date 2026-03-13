@@ -2,7 +2,6 @@ package cobragenskill
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,83 +214,9 @@ func TestGenerateFallback_DescriptionTruncation(t *testing.T) {
 	}
 }
 
-// ── ParseTargets / ResolveTargets / DefaultTargets / BuildTargets ─────────────
+// ── DefaultTargets / BuildTargets ─────────────────────────────────────────────
 
-func TestParseTargets(t *testing.T) {
-	tests := []struct {
-		input   string
-		wantLen int
-		wantErr bool
-	}{
-		{"claude", 1, false},
-		{"claude,codex", 2, false},
-		{"all", 1, false},
-		{"claude, codex , agents", 3, false},
-		{"unknown", 0, true},
-		{"claude,bad", 0, true},
-	}
-	for _, tc := range tests {
-		got, err := ParseTargets(tc.input)
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("ParseTargets(%q): expected error, got nil", tc.input)
-			}
-		} else {
-			if err != nil {
-				t.Errorf("ParseTargets(%q): unexpected error: %v", tc.input, err)
-			}
-			if len(got) != tc.wantLen {
-				t.Errorf("ParseTargets(%q): len=%d, want %d", tc.input, len(got), tc.wantLen)
-			}
-		}
-	}
-}
-
-func TestResolveTargets_AlwaysIncludesAgents(t *testing.T) {
-	tests := [][]ClientTarget{
-		{TargetClaude},
-		{TargetCodex},
-		{TargetGemini},
-		{},
-		nil,
-	}
-	for _, input := range tests {
-		got := ResolveTargets(input)
-		var hasAgents bool
-		for _, t := range got {
-			if t == TargetAgents {
-				hasAgents = true
-			}
-		}
-		if !hasAgents {
-			t.Errorf("ResolveTargets(%v): missing TargetAgents in %v", input, got)
-		}
-	}
-}
-
-func TestResolveTargets_All(t *testing.T) {
-	got := ResolveTargets([]ClientTarget{TargetAll})
-	if len(got) != len(allKnownTargets) {
-		t.Errorf("TargetAll: got %v (%d), want all %d known targets", got, len(got), len(allKnownTargets))
-	}
-}
-
-func TestResolveTargets_Deduplication(t *testing.T) {
-	got := ResolveTargets([]ClientTarget{TargetClaude, TargetClaude, TargetAgents})
-	seen := make(map[ClientTarget]int)
-	for _, t := range got {
-		seen[t]++
-	}
-	for k, count := range seen {
-		if count > 1 {
-			t.Errorf("duplicate target %q (count=%d)", k, count)
-		}
-	}
-}
-
-func TestDefaultTargets_FallbackOnlyHasAgents(t *testing.T) {
-	// When generation agent is AgentNone (fallback), no AI did the work —
-	// we only default to .agents/skills/ (cross-client).
+func TestDefaultTargets_Fallback(t *testing.T) {
 	got := DefaultTargets(AgentNone)
 	if len(got) != 1 || got[0] != TargetAgents {
 		t.Errorf("DefaultTargets(AgentNone) = %v; want [agents]", got)
@@ -300,8 +225,8 @@ func TestDefaultTargets_FallbackOnlyHasAgents(t *testing.T) {
 
 func TestDefaultTargets_KnownAgent(t *testing.T) {
 	tests := []struct {
-		agent      Agent
-		wantFirst  ClientTarget
+		agent     Agent
+		wantFirst ClientTarget
 	}{
 		{AgentClaude, TargetClaude},
 		{AgentCodex, TargetCodex},
@@ -309,27 +234,20 @@ func TestDefaultTargets_KnownAgent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := DefaultTargets(tc.agent)
-		if len(got) < 2 {
-			t.Errorf("DefaultTargets(%s): expected at least 2 targets, got %v", tc.agent, got)
-			continue
-		}
-		if got[0] != tc.wantFirst {
-			t.Errorf("DefaultTargets(%s)[0] = %q, want %q", tc.agent, got[0], tc.wantFirst)
+		if len(got) != 2 || got[0] != tc.wantFirst || got[1] != TargetAgents {
+			t.Errorf("DefaultTargets(%s) = %v; want [%s agents]", tc.agent, got, tc.wantFirst)
 		}
 	}
 }
 
 func TestBuildTargets_ProjectScope(t *testing.T) {
-	targets := BuildTargets("mytool", ScopeProject, []ClientTarget{TargetClaude, TargetCodex, TargetAgents})
+	targets := BuildTargets("mytool", ScopeProject, []ClientTarget{TargetClaude, TargetAgents})
 	byClient := make(map[ClientTarget]string)
 	for _, tgt := range targets {
 		byClient[tgt.Client] = tgt.SkillDir
 	}
 	if byClient[TargetClaude] != filepath.Join(".claude", "skills", "mytool") {
 		t.Errorf("claude dir = %q", byClient[TargetClaude])
-	}
-	if byClient[TargetCodex] != filepath.Join(".codex", "skills", "mytool") {
-		t.Errorf("codex dir = %q", byClient[TargetCodex])
 	}
 	if byClient[TargetAgents] != filepath.Join(".agents", "skills", "mytool") {
 		t.Errorf("agents dir = %q", byClient[TargetAgents])
@@ -402,9 +320,7 @@ func TestGenSkillCommand_DryRun(t *testing.T) {
 	}
 }
 
-func TestGenSkillCommand_ProjectInstall_FallbackDefaultsToAgents(t *testing.T) {
-	// When --no-ai is used and no --for is given, only .agents/skills/ is created
-	// (fallback has no generation agent, so no agent-native dir is assumed).
+func TestGenSkillCommand_ProjectInstall_FallbackOnlyAgents(t *testing.T) {
 	orig, _ := os.Getwd()
 	dir := t.TempDir()
 	os.Chdir(dir)
@@ -417,96 +333,47 @@ func TestGenSkillCommand_ProjectInstall_FallbackDefaultsToAgents(t *testing.T) {
 	root.SetOut(&out)
 	root.SetErr(&out)
 
-	root.SetArgs([]string{"gen-skill", "--no-ai", "--project"})
+	root.SetArgs([]string{"gen-skill", "--no-ai", "--scope", "project"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Only .agents/skills/ should exist (cross-client default for fallback).
-	agents := filepath.Join(dir, ".agents", "skills", "testapp", "SKILL.md")
-	if _, err := os.Stat(agents); err != nil {
-		t.Errorf("expected %s to exist: %v", agents, err)
+	// Fallback → only .agents/skills/ (no agent-specific dir assumed).
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "skills", "testapp", "SKILL.md")); err != nil {
+		t.Errorf(".agents/skills not created: %v", err)
 	}
-
-	// .claude/skills/ must NOT exist unless explicitly requested.
-	claude := filepath.Join(dir, ".claude", "skills", "testapp", "SKILL.md")
-	if _, err := os.Stat(claude); err == nil {
-		t.Errorf("%s should NOT exist when --for was not specified with fallback", claude)
+	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills", "testapp", "SKILL.md")); err == nil {
+		t.Error(".claude/skills should NOT be created by fallback")
 	}
 }
 
-func TestGenSkillCommand_ProjectInstall_ExplicitFor(t *testing.T) {
-	// With --for claude,codex both native dirs are created.
-	orig, _ := os.Getwd()
-	dir := t.TempDir()
-	os.Chdir(dir)
-	defer os.Chdir(orig)
+// ── parseScope ────────────────────────────────────────────────────────────────
 
-	root := buildTestTree()
-	RegisterCommand(root, WithAgent(AgentNone))
-
-	var out bytes.Buffer
-	root.SetOut(&out)
-	root.SetErr(&out)
-
-	root.SetArgs([]string{"gen-skill", "--no-ai", "--project", "--for", "claude,codex"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	for _, client := range []string{".claude", ".codex", ".agents"} {
-		dest := filepath.Join(dir, client, "skills", "testapp", "SKILL.md")
-		if _, err := os.Stat(dest); err != nil {
-			t.Errorf("expected %s to exist: %v", dest, err)
-		}
-	}
-}
-
-// ── resolveScope ──────────────────────────────────────────────────────────────
-
-func TestResolveScope_Flags(t *testing.T) {
+func TestParseScope(t *testing.T) {
 	tests := []struct {
-		flags    genSkillFlags
-		wantErr  bool
+		input     string
 		wantScope InstallScope
+		wantErr   bool
 	}{
-		{genSkillFlags{global: true}, false, ScopeGlobal},
-		{genSkillFlags{project: true}, false, ScopeProject},
-		{genSkillFlags{global: true, project: true}, true, ""},
+		{"project", ScopeProject, false},
+		{"global", ScopeGlobal, false},
+		{"", ScopeProject, false},
+		{"PROJECT", ScopeProject, false},
+		{"bad", "", true},
 	}
 	for _, tc := range tests {
-		scope, err := resolveScope(io.Discard, strings.NewReader(""), tc.flags)
+		got, err := parseScope(tc.input)
 		if tc.wantErr {
 			if err == nil {
-				t.Errorf("flags %+v: expected error, got nil", tc.flags)
+				t.Errorf("parseScope(%q): expected error", tc.input)
 			}
 		} else {
 			if err != nil {
-				t.Errorf("flags %+v: unexpected error: %v", tc.flags, err)
+				t.Errorf("parseScope(%q): unexpected error: %v", tc.input, err)
 			}
-			if scope != tc.wantScope {
-				t.Errorf("flags %+v: scope = %q, want %q", tc.flags, scope, tc.wantScope)
+			if got != tc.wantScope {
+				t.Errorf("parseScope(%q) = %q, want %q", tc.input, got, tc.wantScope)
 			}
-		}
-	}
-}
-
-func TestResolveScope_Interactive(t *testing.T) {
-	tests := []struct {
-		input string
-		want  InstallScope
-	}{
-		{"1\n", ScopeGlobal},
-		{"2\n", ScopeProject},
-		{"\n", ScopeGlobal}, // default
-	}
-	for _, tc := range tests {
-		scope, err := resolveScope(io.Discard, strings.NewReader(tc.input), genSkillFlags{})
-		if err != nil {
-			t.Errorf("input %q: unexpected error: %v", tc.input, err)
-		}
-		if scope != tc.want {
-			t.Errorf("input %q: scope = %q, want %q", tc.input, scope, tc.want)
 		}
 	}
 }

@@ -23,8 +23,7 @@ type config struct {
 	skillName   string
 	description string
 	agent       Agent
-	agentBin    string         // custom path to the agent binary
-	targets     []ClientTarget // nil = auto (derived from generation agent at runtime)
+	agentBin    string // custom path to the agent binary
 	license     string
 	version     string
 	metadata    map[string]string
@@ -77,9 +76,3 @@ func WithMetadata(key, value string) Option {
 	return func(c *config) { c.metadata[key] = value }
 }
 
-// WithTargets sets the agent clients to install the skill for.
-// By default the target is derived from the generation agent at runtime.
-// Accepts the same values as the --for flag: claude, codex, gemini, cursor, agents, all.
-func WithTargets(targets ...ClientTarget) Option {
-	return func(c *config) { c.targets = targets }
-}
