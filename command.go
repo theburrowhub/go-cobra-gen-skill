@@ -29,19 +29,24 @@ the install directory. .agents/skills/ is always included as well
   --agent claude  → generates with Claude, installs in .claude/skills/ + .agents/skills/
   --agent codex   → generates with Codex,  installs in .codex/skills/  + .agents/skills/
   --agent gemini  → generates with Gemini, installs in .gemini/skills/ + .agents/skills/
-  --agent auto    → tries claude → codex → gemini, installs for whichever succeeds
-  --agent none    → help-text fallback, installs in .agents/skills/ only`,
+
+If the agent binary is not found or fails, the command falls back to
+generating the skill from the built-in help text.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			scope, err := parseScope(flagScope)
 			if err != nil {
 				return err
 			}
+			agent := Agent(flagAgent)
+			if _, ok := knownAgents[agent]; !ok {
+				return fmt.Errorf("invalid --agent %q — valid values: claude, codex, gemini", flagAgent)
+			}
 			return runGenSkill(cmd, rootCmd, cfg, genSkillFlags{
 				scope:  scope,
 				noAI:   flagNoAI,
 				dryRun: flagDryRun,
-				agent:  Agent(flagAgent),
+				agent:  agent,
 				name:   sanitizeName(flagName),
 			})
 		},
@@ -54,8 +59,8 @@ the install directory. .agents/skills/ is always included as well
 		"Skip AI generation; use help-text fallback only")
 	f.BoolVar(&flagDryRun, "dry-run", false,
 		"Print the generated SKILL.md to stdout without writing any files")
-	f.StringVar(&flagAgent, "agent", string(AgentAuto),
-		"Agent to generate and install for: auto | claude | codex | gemini | none")
+	f.StringVar(&flagAgent, "agent", string(AgentClaude),
+		"Agent to generate and install for: claude | codex | gemini")
 	f.StringVar(&flagName, "name", cfg.skillName,
 		"Override the skill name (default: app name, sanitized)")
 
@@ -88,16 +93,14 @@ func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags 
 	if flags.name != "" {
 		localCfg.skillName = flags.name
 	}
-	if flags.noAI {
-		localCfg.agent = AgentNone
-	} else if flags.agent != "" && flags.agent != AgentAuto {
+	if flags.agent != "" {
 		localCfg.agent = flags.agent
 	}
 
 	fmt.Fprintf(out, "Collecting help from %s command tree...\n", rootCmd.Name())
 
 	var result GenerateResult
-	if localCfg.agent == AgentNone {
+	if flags.noAI {
 		fmt.Fprintln(out, "AI generation disabled — using help-text fallback.")
 		root := CollectHelp(rootCmd)
 		result = GenerateResult{
@@ -105,16 +108,12 @@ func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags 
 			Method:  "fallback",
 		}
 	} else {
-		label := string(localCfg.agent)
-		if localCfg.agent == AgentAuto {
-			label = "auto (claude → codex → gemini)"
-		}
-		fmt.Fprintf(out, "Generating skill with AI agent (%s)...\n", label)
+		fmt.Fprintf(out, "Generating skill with %s...\n", localCfg.agent)
 		result = Generate(&localCfg, rootCmd)
 		if strings.HasPrefix(result.Method, "fallback") {
 			fmt.Fprintln(out, "AI generation unavailable — using help-text fallback.")
 		} else {
-			fmt.Fprintf(out, "AI generation succeeded (%s).\n", result.Method)
+			fmt.Fprintf(out, "AI generation succeeded.\n")
 		}
 	}
 
@@ -147,5 +146,5 @@ func clientTargetsFromMethod(method string) []ClientTarget {
 	if after, ok := strings.CutPrefix(method, "ai:"); ok {
 		return DefaultTargets(Agent(after))
 	}
-	return DefaultTargets(AgentNone)
+	return DefaultTargets("")
 }

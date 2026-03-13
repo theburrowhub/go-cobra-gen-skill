@@ -6,16 +6,9 @@ import "github.com/spf13/cobra"
 type Agent string
 
 const (
-	// AgentAuto tries claude → codex → gemini in order, using whichever is found.
-	AgentAuto Agent = "auto"
-	// AgentClaude uses Claude Code (`claude --print`).
 	AgentClaude Agent = "claude"
-	// AgentCodex uses OpenAI Codex CLI (`codex --no-interactive`).
-	AgentCodex Agent = "codex"
-	// AgentGemini uses Gemini CLI (`gemini`).
+	AgentCodex  Agent = "codex"
 	AgentGemini Agent = "gemini"
-	// AgentNone skips AI generation entirely and uses the help-text fallback.
-	AgentNone Agent = "none"
 )
 
 // config holds the resolved configuration for gen-skill.
@@ -32,7 +25,7 @@ type config struct {
 func defaultConfig(rootCmd *cobra.Command) *config {
 	return &config{
 		skillName: sanitizeName(rootCmd.Name()),
-		agent:     AgentAuto,
+		agent:     AgentClaude,
 		metadata:  make(map[string]string),
 	}
 }
@@ -75,4 +68,3 @@ func WithVersion(v string) Option {
 func WithMetadata(key, value string) Option {
 	return func(c *config) { c.metadata[key] = value }
 }
-

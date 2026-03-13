@@ -216,10 +216,11 @@ func TestGenerateFallback_DescriptionTruncation(t *testing.T) {
 
 // ── DefaultTargets / BuildTargets ─────────────────────────────────────────────
 
-func TestDefaultTargets_Fallback(t *testing.T) {
-	got := DefaultTargets(AgentNone)
+func TestDefaultTargets_UnknownAgent(t *testing.T) {
+	// An agent with no native dir mapping should return only .agents/skills/.
+	got := DefaultTargets(Agent("unknown"))
 	if len(got) != 1 || got[0] != TargetAgents {
-		t.Errorf("DefaultTargets(AgentNone) = %v; want [agents]", got)
+		t.Errorf("DefaultTargets(unknown) = %v; want [agents]", got)
 	}
 }
 
@@ -300,7 +301,7 @@ func TestRegisterCommand_AddsGenSkill(t *testing.T) {
 
 func TestGenSkillCommand_DryRun(t *testing.T) {
 	root := buildTestTree()
-	RegisterCommand(root, WithAgent(AgentNone))
+	RegisterCommand(root)
 
 	var out bytes.Buffer
 	root.SetOut(&out)
@@ -327,7 +328,7 @@ func TestGenSkillCommand_ProjectInstall_FallbackOnlyAgents(t *testing.T) {
 	defer os.Chdir(orig)
 
 	root := buildTestTree()
-	RegisterCommand(root, WithAgent(AgentNone))
+	RegisterCommand(root)
 
 	var out bytes.Buffer
 	root.SetOut(&out)

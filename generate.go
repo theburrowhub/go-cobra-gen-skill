@@ -16,41 +16,22 @@ type GenerateResult struct {
 	Method string
 }
 
-// Generate tries to produce a SKILL.md using an AI agent and falls back to
-// the help-text-based generator if AI is unavailable or disabled.
+// Generate tries to produce a SKILL.md using the configured AI agent and falls
+// back to the help-text-based generator if the agent is unavailable or returns
+// invalid output.
 func Generate(cfg *config, rootCmd *cobra.Command) GenerateResult {
 	root := CollectHelp(rootCmd)
 
-	if cfg.agent != AgentNone {
-		prompt := buildPrompt(cfg.skillName, rootCmd.Name(), root)
-		out, err := InvokeAgent(cfg.agent, cfg.agentBin, prompt)
-		if err == nil && looksLikeSkillMD(out) {
-			return GenerateResult{Content: out, Method: "ai:" + string(resolvedAgent(cfg.agent, cfg.agentBin))}
-		}
+	prompt := buildPrompt(cfg.skillName, rootCmd.Name(), root)
+	out, err := InvokeAgent(cfg.agent, cfg.agentBin, prompt)
+	if err == nil && looksLikeSkillMD(out) {
+		return GenerateResult{Content: out, Method: "ai:" + string(cfg.agent)}
 	}
 
 	return GenerateResult{
 		Content: generateFallback(cfg, rootCmd, root),
 		Method:  "fallback",
 	}
-}
-
-// resolvedAgent returns the first agent that would actually be used for AgentAuto.
-func resolvedAgent(a Agent, customBin string) Agent {
-	if a != AgentAuto {
-		return a
-	}
-	for _, candidate := range autoOrder {
-		def := knownAgents[candidate]
-		bin := def.bin
-		if customBin != "" {
-			bin = customBin
-		}
-		if isOnPath(bin) {
-			return candidate
-		}
-	}
-	return AgentNone
 }
 
 // looksLikeSkillMD does a quick sanity-check that the AI output begins with
