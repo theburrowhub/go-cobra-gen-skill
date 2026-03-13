@@ -1,0 +1,28 @@
+name: Tag on push to main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+          # Conventional commit prefixes:
+          #   feat:            → minor bump  (e.g. v1.1.0)
+          #   fix: / perf:     → patch bump  (e.g. v1.0.1)
+          #   BREAKING CHANGE  → major bump  (e.g. v2.0.0)
+          # All other commits → patch bump
