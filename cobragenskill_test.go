@@ -215,13 +215,134 @@ func TestGenerateFallback_DescriptionTruncation(t *testing.T) {
 	}
 }
 
+// ── ParseTargets / ResolveTargets / DefaultTargets / BuildTargets ─────────────
+
+func TestParseTargets(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantLen int
+		wantErr bool
+	}{
+		{"claude", 1, false},
+		{"claude,codex", 2, false},
+		{"all", 1, false},
+		{"claude, codex , agents", 3, false},
+		{"unknown", 0, true},
+		{"claude,bad", 0, true},
+	}
+	for _, tc := range tests {
+		got, err := ParseTargets(tc.input)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseTargets(%q): expected error, got nil", tc.input)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("ParseTargets(%q): unexpected error: %v", tc.input, err)
+			}
+			if len(got) != tc.wantLen {
+				t.Errorf("ParseTargets(%q): len=%d, want %d", tc.input, len(got), tc.wantLen)
+			}
+		}
+	}
+}
+
+func TestResolveTargets_AlwaysIncludesAgents(t *testing.T) {
+	tests := [][]ClientTarget{
+		{TargetClaude},
+		{TargetCodex},
+		{TargetGemini},
+		{},
+		nil,
+	}
+	for _, input := range tests {
+		got := ResolveTargets(input)
+		var hasAgents bool
+		for _, t := range got {
+			if t == TargetAgents {
+				hasAgents = true
+			}
+		}
+		if !hasAgents {
+			t.Errorf("ResolveTargets(%v): missing TargetAgents in %v", input, got)
+		}
+	}
+}
+
+func TestResolveTargets_All(t *testing.T) {
+	got := ResolveTargets([]ClientTarget{TargetAll})
+	if len(got) != len(allKnownTargets) {
+		t.Errorf("TargetAll: got %v (%d), want all %d known targets", got, len(got), len(allKnownTargets))
+	}
+}
+
+func TestResolveTargets_Deduplication(t *testing.T) {
+	got := ResolveTargets([]ClientTarget{TargetClaude, TargetClaude, TargetAgents})
+	seen := make(map[ClientTarget]int)
+	for _, t := range got {
+		seen[t]++
+	}
+	for k, count := range seen {
+		if count > 1 {
+			t.Errorf("duplicate target %q (count=%d)", k, count)
+		}
+	}
+}
+
+func TestDefaultTargets_FallbackOnlyHasAgents(t *testing.T) {
+	// When generation agent is AgentNone (fallback), no AI did the work —
+	// we only default to .agents/skills/ (cross-client).
+	got := DefaultTargets(AgentNone)
+	if len(got) != 1 || got[0] != TargetAgents {
+		t.Errorf("DefaultTargets(AgentNone) = %v; want [agents]", got)
+	}
+}
+
+func TestDefaultTargets_KnownAgent(t *testing.T) {
+	tests := []struct {
+		agent      Agent
+		wantFirst  ClientTarget
+	}{
+		{AgentClaude, TargetClaude},
+		{AgentCodex, TargetCodex},
+		{AgentGemini, TargetGemini},
+	}
+	for _, tc := range tests {
+		got := DefaultTargets(tc.agent)
+		if len(got) < 2 {
+			t.Errorf("DefaultTargets(%s): expected at least 2 targets, got %v", tc.agent, got)
+			continue
+		}
+		if got[0] != tc.wantFirst {
+			t.Errorf("DefaultTargets(%s)[0] = %q, want %q", tc.agent, got[0], tc.wantFirst)
+		}
+	}
+}
+
+func TestBuildTargets_ProjectScope(t *testing.T) {
+	targets := BuildTargets("mytool", ScopeProject, []ClientTarget{TargetClaude, TargetCodex, TargetAgents})
+	byClient := make(map[ClientTarget]string)
+	for _, tgt := range targets {
+		byClient[tgt.Client] = tgt.SkillDir
+	}
+	if byClient[TargetClaude] != filepath.Join(".claude", "skills", "mytool") {
+		t.Errorf("claude dir = %q", byClient[TargetClaude])
+	}
+	if byClient[TargetCodex] != filepath.Join(".codex", "skills", "mytool") {
+		t.Errorf("codex dir = %q", byClient[TargetCodex])
+	}
+	if byClient[TargetAgents] != filepath.Join(".agents", "skills", "mytool") {
+		t.Errorf("agents dir = %q", byClient[TargetAgents])
+	}
+}
+
 // ── Install ───────────────────────────────────────────────────────────────────
 
 func TestInstall_WritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	targets := []InstallTarget{
-		{Scope: ScopeGlobal, Client: "claude", SkillDir: filepath.Join(dir, ".claude", "skills", "testapp")},
-		{Scope: ScopeGlobal, Client: "agents", SkillDir: filepath.Join(dir, ".agents", "skills", "testapp")},
+		{Scope: ScopeGlobal, Client: TargetClaude, SkillDir: filepath.Join(dir, ".claude", "skills", "testapp")},
+		{Scope: ScopeGlobal, Client: TargetAgents, SkillDir: filepath.Join(dir, ".agents", "skills", "testapp")},
 	}
 	content := "---\nname: testapp\ndescription: test\n---\n\n# body\n"
 
@@ -281,8 +402,9 @@ func TestGenSkillCommand_DryRun(t *testing.T) {
 	}
 }
 
-func TestGenSkillCommand_ProjectInstall(t *testing.T) {
-	// Change to a temp directory so .claude/skills/ is created there.
+func TestGenSkillCommand_ProjectInstall_FallbackDefaultsToAgents(t *testing.T) {
+	// When --no-ai is used and no --for is given, only .agents/skills/ is created
+	// (fallback has no generation agent, so no agent-native dir is assumed).
 	orig, _ := os.Getwd()
 	dir := t.TempDir()
 	os.Chdir(dir)
@@ -300,16 +422,43 @@ func TestGenSkillCommand_ProjectInstall(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify .claude/skills/testapp/SKILL.md exists.
-	dest := filepath.Join(dir, ".claude", "skills", "testapp", "SKILL.md")
-	if _, err := os.Stat(dest); err != nil {
-		t.Errorf("expected %s to exist: %v", dest, err)
+	// Only .agents/skills/ should exist (cross-client default for fallback).
+	agents := filepath.Join(dir, ".agents", "skills", "testapp", "SKILL.md")
+	if _, err := os.Stat(agents); err != nil {
+		t.Errorf("expected %s to exist: %v", agents, err)
 	}
 
-	// Verify .agents/skills/testapp/SKILL.md exists.
-	dest2 := filepath.Join(dir, ".agents", "skills", "testapp", "SKILL.md")
-	if _, err := os.Stat(dest2); err != nil {
-		t.Errorf("expected %s to exist: %v", dest2, err)
+	// .claude/skills/ must NOT exist unless explicitly requested.
+	claude := filepath.Join(dir, ".claude", "skills", "testapp", "SKILL.md")
+	if _, err := os.Stat(claude); err == nil {
+		t.Errorf("%s should NOT exist when --for was not specified with fallback", claude)
+	}
+}
+
+func TestGenSkillCommand_ProjectInstall_ExplicitFor(t *testing.T) {
+	// With --for claude,codex both native dirs are created.
+	orig, _ := os.Getwd()
+	dir := t.TempDir()
+	os.Chdir(dir)
+	defer os.Chdir(orig)
+
+	root := buildTestTree()
+	RegisterCommand(root, WithAgent(AgentNone))
+
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	root.SetArgs([]string{"gen-skill", "--no-ai", "--project", "--for", "claude,codex"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, client := range []string{".claude", ".codex", ".agents"} {
+		dest := filepath.Join(dir, client, "skills", "testapp", "SKILL.md")
+		if _, err := os.Stat(dest); err != nil {
+			t.Errorf("expected %s to exist: %v", dest, err)
+		}
 	}
 }
 
