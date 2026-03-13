@@ -61,8 +61,7 @@ generating the skill from the built-in help text.`,
 		"Print the generated SKILL.md to stdout without writing any files")
 	f.StringVar(&flagAgent, "agent", string(AgentClaude),
 		"Agent to generate and install for: claude | codex | gemini")
-	f.StringVar(&flagName, "name", cfg.skillName,
-		"Override the skill name (default: app name, sanitized)")
+	f.StringVar(&flagName, "name", cfg.skillName, "Skill name")
 
 	return cmd
 }
@@ -90,12 +89,8 @@ func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags 
 	out := cmd.OutOrStdout()
 
 	localCfg := *cfg
-	if flags.name != "" {
-		localCfg.skillName = flags.name
-	}
-	if flags.agent != "" {
-		localCfg.agent = flags.agent
-	}
+	localCfg.skillName = flags.name // always set; defaults to sanitized app name
+	localCfg.agent = flags.agent
 
 	fmt.Fprintf(out, "Collecting help from %s command tree...\n", rootCmd.Name())
 
