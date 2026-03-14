@@ -52,7 +52,7 @@ func collectNode(cmd *cobra.Command, path string) *CommandNode {
 	node.HelpText = strings.TrimSpace(buf.String())
 
 	for _, sub := range cmd.Commands() {
-		if sub.Hidden || sub.Name() == "help" || sub.Name() == "gen-skill" {
+		if sub.Hidden || sub.Name() == "help" || sub.Name() == "completion" || sub.Name() == "gen-skill" {
 			continue
 		}
 		var subPath string
