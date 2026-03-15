@@ -10,12 +10,11 @@ import (
 
 func newGenSkillCmd(rootCmd *cobra.Command, cfg *config) *cobra.Command {
 	var (
-		flagScope    string
-		flagNoAI     bool
-		flagDryRun   bool
-		flagValidate bool
-		flagAgent    string
-		flagName     string
+		flagScope  string
+		flagNoAI   bool
+		flagDryRun bool
+		flagAgent  string
+		flagName   string
 	)
 
 	cmd := &cobra.Command{
@@ -44,12 +43,11 @@ generating the skill from the built-in help text.`,
 				return fmt.Errorf("invalid --agent %q — valid values: claude, codex, gemini", flagAgent)
 			}
 			return runGenSkill(cmd, rootCmd, cfg, genSkillFlags{
-				scope:    scope,
-				noAI:     flagNoAI,
-				dryRun:   flagDryRun,
-				validate: flagValidate,
-				agent:    agent,
-				name:     sanitizeName(flagName),
+				scope:  scope,
+				noAI:   flagNoAI,
+				dryRun: flagDryRun,
+				agent:  agent,
+				name:   sanitizeName(flagName),
 			})
 		},
 	}
@@ -61,8 +59,6 @@ generating the skill from the built-in help text.`,
 		"Skip AI generation; use help-text fallback only")
 	f.BoolVar(&flagDryRun, "dry-run", false,
 		"Print the generated SKILL.md to stdout without writing any files")
-	f.BoolVar(&flagValidate, "validate", false,
-		"Validate that the AI output looks like a SKILL.md before accepting it")
 	f.StringVar(&flagAgent, "agent", string(AgentClaude),
 		"Agent to generate and install for: claude | codex | gemini")
 	f.StringVar(&flagName, "name", cfg.skillName, "Skill name")
@@ -82,12 +78,11 @@ func parseScope(s string) (InstallScope, error) {
 }
 
 type genSkillFlags struct {
-	scope    InstallScope
-	noAI     bool
-	dryRun   bool
-	validate bool
-	agent    Agent
-	name     string
+	scope  InstallScope
+	noAI   bool
+	dryRun bool
+	agent  Agent
+	name   string
 }
 
 func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags genSkillFlags) error {
@@ -109,7 +104,7 @@ func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags 
 		}
 	} else {
 		fmt.Fprintf(out, "Generating skill with %s...\n", localCfg.agent)
-		result = Generate(&localCfg, rootCmd, flags.validate)
+		result = Generate(&localCfg, rootCmd)
 		if strings.HasPrefix(result.Method, "fallback") {
 			fmt.Fprintln(out, "AI generation unavailable — using help-text fallback.")
 		} else {

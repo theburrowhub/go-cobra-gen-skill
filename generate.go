@@ -17,14 +17,14 @@ type GenerateResult struct {
 }
 
 // Generate tries to produce a SKILL.md using the configured AI agent and falls
-// back to the help-text-based generator if the agent is unavailable or, when
-// validate is true, returns output that does not look like a valid SKILL.md.
-func Generate(cfg *config, rootCmd *cobra.Command, validate bool) GenerateResult {
+// back to the help-text-based generator if the agent is unavailable or returns
+// invalid output.
+func Generate(cfg *config, rootCmd *cobra.Command) GenerateResult {
 	root := CollectHelp(rootCmd)
 
 	prompt := buildPrompt(cfg.skillName, rootCmd.Name(), root)
 	out, err := InvokeAgent(cfg.agent, cfg.agentBin, prompt)
-	if err == nil && (!validate || looksLikeSkillMD(out)) {
+	if err == nil && looksLikeSkillMD(out) {
 		return GenerateResult{Content: out, Method: "ai:" + string(cfg.agent)}
 	}
 
