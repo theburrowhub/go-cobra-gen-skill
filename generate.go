@@ -14,6 +14,8 @@ type GenerateResult struct {
 	Content string
 	// Method describes how the skill was generated ("ai:claude", "ai:codex", "fallback", etc.).
 	Method string
+	// FallbackReason explains why AI generation was not used; empty when it succeeded.
+	FallbackReason string
 }
 
 // Generate tries to produce a SKILL.md using the configured AI agent and falls
@@ -24,13 +26,20 @@ func Generate(cfg *config, rootCmd *cobra.Command, validate bool) GenerateResult
 
 	prompt := buildPrompt(cfg.skillName, rootCmd.Name(), root)
 	out, err := InvokeAgent(cfg.agent, cfg.agentBin, prompt)
-	if err == nil && (!validate || looksLikeSkillMD(out)) {
+	var reason string
+	switch {
+	case err != nil:
+		reason = err.Error()
+	case validate && !looksLikeSkillMD(out):
+		reason = "agent output does not look like a valid SKILL.md"
+	default:
 		return GenerateResult{Content: out, Method: "ai:" + string(cfg.agent)}
 	}
 
 	return GenerateResult{
-		Content: generateFallback(cfg, rootCmd, root),
-		Method:  "fallback",
+		Content:        generateFallback(cfg, rootCmd, root),
+		Method:         "fallback",
+		FallbackReason: reason,
 	}
 }
 

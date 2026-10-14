@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -376,5 +378,93 @@ func TestParseScope(t *testing.T) {
 				t.Errorf("parseScope(%q) = %q, want %q", tc.input, got, tc.wantScope)
 			}
 		}
+	}
+}
+
+// ── fallback reason ───────────────────────────────────────────────────────────
+
+// fakeAgent writes an executable shell script that stands in for an agent binary.
+func fakeAgent(t *testing.T, script string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake agent scripts require a POSIX shell")
+	}
+	path := filepath.Join(t.TempDir(), "fake-agent")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	return path
+}
+
+const failingAgentScript = `echo "boom: nested session refused" >&2
+exit 1`
+
+func TestInvokeAgent_ErrorIncludesStderr(t *testing.T) {
+	bin := fakeAgent(t, failingAgentScript)
+
+	_, err := InvokeAgent(AgentClaude, bin, "prompt")
+	if err == nil {
+		t.Fatal("expected an error from a failing agent")
+	}
+	if !strings.Contains(err.Error(), "boom: nested session refused") {
+		t.Errorf("error does not include agent stderr: %v", err)
+	}
+}
+
+func TestGenerate_FallbackReason(t *testing.T) {
+	root := buildTestTree()
+	cfg := defaultConfig(root)
+	cfg.agentBin = fakeAgent(t, failingAgentScript)
+
+	result := Generate(cfg, root, false)
+	if result.Method != "fallback" {
+		t.Fatalf("Method = %q; want fallback", result.Method)
+	}
+	if !strings.Contains(result.FallbackReason, "boom: nested session refused") {
+		t.Errorf("FallbackReason = %q; want agent stderr", result.FallbackReason)
+	}
+}
+
+func TestGenerate_FallbackReason_Validation(t *testing.T) {
+	root := buildTestTree()
+	cfg := defaultConfig(root)
+	cfg.agentBin = fakeAgent(t, `echo "not a skill file"`)
+
+	result := Generate(cfg, root, true)
+	if result.Method != "fallback" {
+		t.Fatalf("Method = %q; want fallback", result.Method)
+	}
+	if !strings.Contains(result.FallbackReason, "does not look like a valid SKILL.md") {
+		t.Errorf("FallbackReason = %q; want validation reason", result.FallbackReason)
+	}
+}
+
+func TestGenSkillCommand_FallbackShowsReason(t *testing.T) {
+	root := buildTestTree()
+	RegisterCommand(root, WithAgentBin(fakeAgent(t, failingAgentScript)))
+
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+
+	root.SetArgs([]string{"gen-skill", "--dry-run"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "AI generation unavailable (") ||
+		!strings.Contains(output, "boom: nested session refused") {
+		t.Errorf("fallback message does not show the reason; got:\n%s", output)
+	}
+}
+
+func TestTail_RuneBoundary(t *testing.T) {
+	got := tail("aé", 1) // "é" is 2 bytes; a 1-byte cut must not split it
+	if !utf8.ValidString(got) {
+		t.Errorf("tail returned invalid UTF-8: %q", got)
+	}
+	if tail("short", 10) != "short" {
+		t.Error("tail must not truncate strings within the limit")
 	}
 }
