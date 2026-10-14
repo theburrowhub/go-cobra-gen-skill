@@ -2,10 +2,12 @@ package cobragenskill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // agentDef describes how to invoke an AI agent in headless (non-interactive) mode.
@@ -60,6 +62,12 @@ func InvokeAgent(agent Agent, customBin string, prompt string) (string, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("agent %q timed out after 2 minutes", bin)
 		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if stderr := tail(strings.TrimSpace(string(exitErr.Stderr)), maxStderrLen); stderr != "" {
+				return "", fmt.Errorf("agent %q exited with error: %w: %s", bin, err, stderr)
+			}
+		}
 		return "", fmt.Errorf("agent %q exited with error: %w", bin, err)
 	}
 
@@ -68,4 +76,20 @@ func InvokeAgent(agent Agent, customBin string, prompt string) (string, error) {
 		return "", fmt.Errorf("agent %q returned empty output", bin)
 	}
 	return result, nil
+}
+
+// maxStderrLen caps how much of the agent's stderr is surfaced in errors.
+const maxStderrLen = 500
+
+// tail returns at most the last n bytes of s, cut on a rune boundary and
+// prefixed with "..." when truncated.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return "..." + s[start:]
 }

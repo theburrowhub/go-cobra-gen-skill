@@ -111,7 +111,11 @@ func runGenSkill(cmd *cobra.Command, rootCmd *cobra.Command, cfg *config, flags 
 		fmt.Fprintf(out, "Generating skill with %s...\n", localCfg.agent)
 		result = Generate(&localCfg, rootCmd, flags.validate)
 		if strings.HasPrefix(result.Method, "fallback") {
-			fmt.Fprintln(out, "AI generation unavailable — using help-text fallback.")
+			if result.FallbackReason != "" {
+				fmt.Fprintf(out, "AI generation unavailable (%s) — using help-text fallback.\n", result.FallbackReason)
+			} else {
+				fmt.Fprintln(out, "AI generation unavailable — using help-text fallback.")
+			}
 		} else {
 			fmt.Fprintf(out, "AI generation succeeded.\n")
 		}
